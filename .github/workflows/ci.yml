@@ -1,0 +1,66 @@
+name: CI
+
+# Unit tests on the Python Wazuh embeds (3.10) and a current one, then the rules
+# through a real wazuh-manager's wazuh-logtest. The full stack e2e (dev/e2e.sh)
+# needs an ir.mlab.sh licence and ~10 GB of images, so it stays a local check.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Talks only to local fake servers and a temp unix socket: no network, no credentials.
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Syntax (XML, shell)
+        if: matrix.python == '3.13'
+        run: |
+          sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null
+          xmllint --noout rules/mlab_rules.xml dev/wazuh/agent.conf dev/wazuh/mlab-integrations.conf
+          for f in integrations/custom-mlab integrations/custom-mlab-ir dev/*.sh tests/*.sh; do bash -n "$f"; done
+
+  rules:
+    name: rules (wazuh-logtest, Wazuh ${{ matrix.wazuh }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        wazuh: ["4.14.8"]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image copies /wazuh-config-mount into /var/ossec when the container is created.
+      - name: Start wazuh-manager with the mlab rules
+        run: |
+          docker run -d --name wm \
+            -v "$PWD/rules/mlab_rules.xml:/wazuh-config-mount/etc/rules/mlab_rules.xml:ro" \
+            wazuh/wazuh-manager:${{ matrix.wazuh }}
+
+      - name: Rules fire as expected
+        env:
+          LOGTEST: docker exec -i wm /var/ossec/bin/wazuh-logtest
+        run: tests/rules.sh
+
+      - name: Manager logs on failure
+        if: failure()
+        run: docker exec wm tail -50 /var/ossec/logs/ossec.log

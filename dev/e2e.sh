@@ -34,17 +34,7 @@ mgr grep -q '<name>custom-mlab-ir</name>' /var/ossec/etc/ossec.conf && ok "integ
 mgr pgrep -f wazuh-integratord >/dev/null && ok "wazuh-integratord running" || ko "wazuh-integratord not running"
 
 step "4. Rules (wazuh-logtest)"
-# wazuh-logtest is not ready for a while after the manager (re)starts: keep trying for 30s
-logtest1() { mgr /var/ossec/bin/wazuh-logtest <<<"$1" 2>&1 | grep -q "id: '$2'"; }
-logtest() { wait_for 30 logtest1 "$@"; }
-logtest '{"integration":"mlab","mlab":{"type":"hash","value":"x","verdict":"known_malicious"},"source":{"file":"/tmp/x"}}' 100601 \
-  && ok "hash known_malicious -> 100601 (level 12)" || ko "100601"
-logtest '{"integration":"mlab","mlab":{"type":"hash","value":"x","verdict":"known_good"},"source":{"file":"/tmp/x"}}' 100602 \
-  && ok "hash known_good -> 100602" || ko "100602"
-logtest '{"integration":"mlab","mlab":{"type":"url","value":"http://bit.ly/x.exe","severities":["high","medium"]}}' 100603 \
-  && ok "url with high finding -> 100603" || ko "100603"
-logtest '{"integration":"mlab","mlab":{"type":"ip","value":"185.220.101.1","tor":true}}' 100604 \
-  && ok "tor ip -> 100604" || ko "100604"
+tests/rules.sh || fails=$((fails+$?))
 
 step "5. Full chain: EICAR dropped on agent web01"
 EICAR_SHA=275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
