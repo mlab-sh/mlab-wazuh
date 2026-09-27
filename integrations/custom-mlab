@@ -1,0 +1,3 @@
+#!/bin/sh
+# integratord runs integrations/<name>; hand off to Wazuh's embedded Python.
+exec "$(dirname "$0")/../framework/python/bin/python3" "$0.py" "$@"

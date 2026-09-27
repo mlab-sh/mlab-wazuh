@@ -1,0 +1,177 @@
+# Dev stack: Wazuh 4.14.8 single-node + one agent + ir.mlab.sh. Start it with dev/setup.sh, not directly.
+# Wazuh parts follow wazuh/wazuh-docker v4.14.8 single-node (config vendored in dev/wazuh/).
+
+x-ir-env: &ir-env
+  CH_HOST: ir-clickhouse
+  CH_USERNAME: default
+  CH_PASSWORD: changeme
+  INTERNAL_SECRET: ${INTERNAL_SECRET:?run dev/setup.sh}
+  APP_CALLBACK_URL: http://ir-app:8080
+
+services:
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.14.8
+    hostname: wazuh.manager
+    restart: unless-stopped
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 655360, hard: 655360 }
+    ports:
+      - "55000:55000"
+    environment:
+      - INDEXER_URL=https://wazuh.indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      # copied into /var/ossec at each start by the image entrypoint
+      - ./dev/.generated/ossec.conf:/wazuh-config-mount/etc/ossec.conf
+      - ./dev/wazuh/agent.conf:/wazuh-config-mount/etc/shared/default/agent.conf
+      - ./dev/wazuh/local_internal_options.conf:/wazuh-config-mount/etc/local_internal_options.conf
+      # the code under test, live from the repo
+      - ./rules/mlab_rules.xml:/wazuh-config-mount/etc/rules/mlab_rules.xml
+      # whole dir, not single files: editors replace files (new inode) and a file bind mount
+      # would keep pointing at the deleted one. Hides Wazuh's stock integrations (unused here).
+      - ./integrations:/var/ossec/integrations:ro
+
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.14.8
+    hostname: wazuh.indexer
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms768m -Xmx768m"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+      - ./dev/wazuh/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/config/opensearch.yml
+      - ./dev/wazuh/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml
+
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.14.8
+    hostname: wazuh.dashboard
+    restart: unless-stopped
+    ports:
+      - "8443:5601"
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./dev/wazuh/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./dev/wazuh/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - ./dev/wazuh/wazuh_dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+    depends_on:
+      - wazuh.indexer
+      - wazuh.manager
+
+  wazuh.agent:
+    image: wazuh/wazuh-agent:4.14.8
+    hostname: web01
+    restart: unless-stopped
+    environment:
+      - WAZUH_MANAGER_SERVER=wazuh.manager
+      - WAZUH_AGENT_NAME=web01
+    tmpfs:
+      - /mlab-fim
+    volumes:
+      - ./dev/.generated/agent-logs:/mlab-logs   # created by dev/setup.sh
+    depends_on:
+      - wazuh.manager
+
+  ir-app:
+    image: ghcr.io/mlab-sh/ir.mlab.sh:latest
+    platform: linux/amd64   # only amd64 is published; runs under emulation on Apple silicon
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *ir-env
+      LICENSE_KEY: ${MLAB_IR_LI:?put the ir.mlab.sh licence in .env as MLAB_IR_LI}
+      DB_HOST: ir-mysql
+      DB_PORT: 3306
+      DB_USERNAME: mlab_web
+      DB_PASSWORD: changeme
+      EXECUTOR_URL: http://ir-executor:8090
+      COOKIE_SECURE: "false"
+      DEV: "false"
+    depends_on:
+      ir-mysql: { condition: service_healthy }
+      ir-clickhouse: { condition: service_healthy }
+
+  ir-executor:
+    image: ghcr.io/mlab-sh/ir.mlab.sh-executor:latest
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      <<: *ir-env
+      EXECUTOR_PORT: 8090
+    depends_on:
+      ir-clickhouse: { condition: service_healthy }
+
+  ir-mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=changeme_root
+      - MYSQL_DATABASE=mlabir
+      - MYSQL_USER=mlab_web
+      - MYSQL_PASSWORD=changeme
+    volumes:
+      - ir_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 20
+
+  ir-clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    restart: unless-stopped
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=changeme
+      - CLICKHOUSE_DB=mlabir
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - ir_clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--password", "changeme", "--query", "SELECT 1"]
+      interval: 5s
+      retries: 20
+
+volumes:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  filebeat_etc:
+  filebeat_var:
+  wazuh-indexer-data:
+  ir_mysql:
+  ir_clickhouse:

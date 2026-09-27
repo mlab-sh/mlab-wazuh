@@ -1,0 +1,54 @@
+<!-- mlab.sh enrichment events emitted by integrations/custom-mlab. IDs 100600-100699. -->
+<group name="mlab,">
+
+  <rule id="100600" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^mlab$</field>
+    <description>mlab: enrichment result</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <rule id="100601" level="12">
+    <if_sid>100600</if_sid>
+    <field name="mlab.type">^hash$</field>
+    <field name="mlab.verdict">^known_malicious$</field>
+    <description>mlab: known malicious file $(source.file) ($(mlab.value))</description>
+    <mitre><id>T1204</id></mitre>
+    <group>malware,</group>
+  </rule>
+
+  <rule id="100602" level="3">
+    <if_sid>100600</if_sid>
+    <field name="mlab.type">^hash$</field>
+    <field name="mlab.verdict">^known_good$</field>
+    <description>mlab: known good file $(source.file)</description>
+  </rule>
+
+  <rule id="100603" level="7">
+    <if_sid>100600</if_sid>
+    <field name="mlab.type">^url$</field>
+    <field name="mlab.severities">high|critical</field>
+    <description>mlab: suspicious URL $(mlab.value)</description>
+  </rule>
+
+  <rule id="100604" level="6">
+    <if_sid>100600</if_sid>
+    <field name="mlab.type">^ip$</field>
+    <field name="mlab.tor">^true$</field>
+    <description>mlab: Tor exit node $(mlab.value)</description>
+  </rule>
+
+  <rule id="100605" level="3">
+    <if_sid>100600</if_sid>
+    <field name="mlab.type">^cve$</field>
+    <description>mlab: $(mlab.value) CVSS $(mlab.cvss_score), EPSS $(mlab.epss_score)</description>
+  </rule>
+
+  <rule id="100606" level="13">
+    <if_sid>100605</if_sid>
+    <field name="mlab.in_kev">^true$</field>
+    <description>mlab: $(mlab.value) is known exploited (CISA KEV since $(mlab.kev_date_added))</description>
+    <group>vulnerability,</group>
+  </rule>
+
+</group>
