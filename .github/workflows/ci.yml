@@ -35,8 +35,8 @@ jobs:
       - name: Syntax (XML, shell)
         if: matrix.python == '3.13'
         run: |
-          sudo apt-get install -y --no-install-recommends libxml2-utils >/dev/null
-          xmllint --noout rules/mlab_rules.xml dev/wazuh/agent.conf dev/wazuh/mlab-integrations.conf
+          python -c 'import sys, xml.dom.minidom as m; [m.parse(f) for f in sys.argv[1:]]' \
+            rules/mlab_rules.xml dev/wazuh/agent.conf dev/wazuh/mlab-integrations.conf
           for f in integrations/custom-mlab integrations/custom-mlab-ir dev/*.sh tests/*.sh; do bash -n "$f"; done
 
   rules:

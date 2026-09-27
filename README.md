@@ -95,3 +95,7 @@ dev/e2e.sh     # unit tests, logtest on the rules, EICAR dropped on web01 -> mla
 
 After editing an integration script nothing needs restarting (files are bind-mounted); after editing `rules/mlab_rules.xml` or `dev/wazuh/*` re-run `dev/setup.sh` (it recreates the manager: the image only copies its config on create, a plain restart is not enough).
 Tear down: `docker compose down -v`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The dev stack downloads its Wazuh configuration from [wazuh/wazuh-docker](https://github.com/wazuh/wazuh-docker) (GPLv2) at setup time; it is not part of this repository.

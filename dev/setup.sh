@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 
 IR=http://localhost:8080
 GEN=dev/.generated
+WAZUH_DOCKER=v4.14.8   # wazuh/wazuh-docker tag the Wazuh config comes from
 mkdir -p "$GEN/agent-logs" && touch "$GEN"/agent-logs/{auth.log,squid.log,vuln.json}
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 envval() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
@@ -25,12 +26,24 @@ if [ -z "$(envval INTERNAL_SECRET)" ]; then
   echo "INTERNAL_SECRET added to .env"
 fi
 
+say "Wazuh config (wazuh-docker $WAZUH_DOCKER, GPLv2, downloaded not vendored)"
+W="$GEN/wazuh"
+for f in wazuh_cluster/wazuh_manager.conf wazuh_indexer/wazuh.indexer.yml wazuh_indexer/internal_users.yml \
+         wazuh_dashboard/opensearch_dashboards.yml wazuh_dashboard/wazuh.yml certs.yml; do
+  [ -s "$W/$f" ] || curl -sfL --create-dirs -o "$W/$f" \
+    "https://raw.githubusercontent.com/wazuh/wazuh-docker/$WAZUH_DOCKER/single-node/config/$f" \
+    || { echo "download failed: $f"; exit 1; }
+done
+echo "ok ($W)"
+
 say "Wazuh certificates"
-if [ ! -f dev/wazuh/wazuh_indexer_ssl_certs/root-ca.pem ]; then
-  docker compose -f dev/wazuh/generate-indexer-certs.yml run --rm generator || true
+certs="$W/wazuh_indexer_ssl_certs"
+if [ ! -f "$certs/wazuh.manager.pem" ]; then
+  mkdir -p "$certs"
+  docker run --rm -e CERT_TOOL_VERSION=4.14 -v "$PWD/$certs/:/certificates/" -v "$PWD/$W/certs.yml:/config/certs.yml" \
+    wazuh/wazuh-certs-generator:0.0.4 || true
   # the generator locks the dir (0500) before its own root-ca-manager copy, and leaves keys 0400:
   # both break on Docker Desktop bind mounts. Dev certs, so open them up.
-  certs=dev/wazuh/wazuh_indexer_ssl_certs
   chmod 755 "$certs"
   [ -f "$certs/root-ca-manager.pem" ] || { cp "$certs/root-ca.pem" "$certs/root-ca-manager.pem"; cp "$certs/root-ca.key" "$certs/root-ca-manager.key"; }
   chmod 644 "$certs"/*
@@ -74,7 +87,7 @@ sed -e "s|__IR_TOKEN__|$(cat "$GEN/ir_token")|" \
     dev/wazuh/mlab-integrations.conf \
   | cat <(# vulnerability detection downloads a ~5 GB CVE feed into queue/vd: off for the dev stack
           sed '/<vulnerability-detection>/,/<\/vulnerability-detection>/s|<enabled>yes</enabled>|<enabled>no</enabled>|' \
-            dev/wazuh/wazuh_cluster/wazuh_manager.conf) - > "$GEN/ossec.conf"
+            "$W/wazuh_cluster/wazuh_manager.conf") - > "$GEN/ossec.conf"
 echo "rendered $GEN/ossec.conf (mlab.sh key: $([ -n "$(envval MLAB_API_KEY)" ] && echo from .env || echo none, anonymous lookups))"
 
 say "Wazuh"

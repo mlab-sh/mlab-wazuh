@@ -5,4 +5,3 @@ __pycache__/
 
 # dev stack
 dev/.generated/
-dev/wazuh/wazuh_indexer_ssl_certs/
